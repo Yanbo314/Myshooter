@@ -1,11 +1,13 @@
 #include "raylib.h"
 #include <vector>
 #include <algorithm>
+#include <raymath.h>
+#include <cmath>
 
-enum GameState {MENU, PLAYING, GAMEOVER, EXIT};
+enum class GameState {MENU, PLAYING, GAMEOVER, EXIT};
 
 struct Player { float x, y, speed, size; };
-struct Enemy { float x, y, speed; int size; bool active; float lifeTimer; };
+struct Enemy { float x, y, speed, size; bool active; float lifeTimer; };
 struct Bullet { float x, y, speed; bool  active; };
 
 bool DrawButton(const char* text, int x, int y, int w, int h){
@@ -21,7 +23,7 @@ bool DrawButton(const char* text, int x, int y, int w, int h){
 void ResetGame(Player& player, std::vector<Bullet>& bullets,
 	std::vector<Enemy>& enemies, int& score,
 	int& killed, int& total, float& gameTime, float& spawnTimer) {
-	player = { 600, 500, 600.0f, 20 };
+	player = {.x = 600, .y = 500, .speed = 600.0f, .size = 20.0f };
 	bullets.clear();
 	enemies.clear();
 	score = 0; killed = 0; total = 0;
@@ -29,18 +31,31 @@ void ResetGame(Player& player, std::vector<Bullet>& bullets,
 }
 
 void UpdatePlayer(Player& player, std::vector<Bullet>& bullets, float dt) {
-	float dx = 0, dy = 0;
-	if (IsKeyDown(KEY_W)) dy -= 1;
-	if (IsKeyDown(KEY_S)) dy += 1;
-	if (IsKeyDown(KEY_A)) dx -= 1;
-	if (IsKeyDown(KEY_D)) dx += 1;
+	Vector2 input = { 0, 0 };
 
-	if (dx != 0 && dy != 0) {
-		dx *= 0.7071f;
-		dy *= 0.7071f;
+	if (IsKeyDown(KEY_W)) input.y -= 1;
+	if (IsKeyDown(KEY_S)) input.y += 1;
+	if (IsKeyDown(KEY_A)) input.x -= 1;
+	if (IsKeyDown(KEY_D)) input.x += 1;
+
+	input = Vector2Normalize(input);
+
+	if(IsGamepadAvailable(0)) {
+		float stickX = GetGamepadAxisMovement(0, GAMEPAD_AXIS_LEFT_X);
+		float stickY = GetGamepadAxisMovement(0, GAMEPAD_AXIS_LEFT_Y);
+
+		const float DEADZONE = 0.2f;
+		if (fabsf(stickX) < DEADZONE) stickX = 0;
+		if (fabsf(stickY) < DEADZONE) stickY = 0;
+		 
+		if(stickX != 0 || stickY != 0){
+			input.x = stickX;
+			input.y = stickY;
+		}
 	}
-	player.x += dx * player.speed * dt;
-	player.y += dy * player.speed * dt;
+
+	player.x += input.x * player.speed * dt;
+	player.y += input.y * player.speed * dt;
 
 	if (player.x < 0) player.x = 0;
 	if (player.x > 1200 - player.size) player.x = 1200 - player.size;
@@ -48,19 +63,16 @@ void UpdatePlayer(Player& player, std::vector<Bullet>& bullets, float dt) {
 	if (player.y > 1000 - player.size) player.y = 1000 - player.size;
 
 	if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-		Bullet bullet = { player.x + player.size / 2, player.y, 400.0f, true };
+		Bullet bullet = { player.x + player.size / 2, player.y, 600.0f, true };
 		bullets.push_back(bullet);
 	}
 }
 void UpdateBullets(std::vector<Bullet>& bullets, float dt) {
 	for (auto& b : bullets) {
 		if (!b.active) continue;
-		b.y -= b.speed * dt * 1.5f;
+		b.y -= b.speed * dt;
 		if (b.y < 0) b.active = false;
 	}
-
-	for (int i = (int)bullets.size() - 1; i >= 0; i--)
-		if (!bullets[i].active) bullets.erase(bullets.begin() + i);
 }
 
 void UpdateEnemies(std::vector<Enemy>& enemies, float& spawnTimer,
@@ -69,7 +81,7 @@ void UpdateEnemies(std::vector<Enemy>& enemies, float& spawnTimer,
 	spawnTimer += dt;
 	if (spawnTimer >= interval && (int)enemies.size() < 3) {
 		spawnTimer = 0;
-		Enemy e = { (float)GetRandomValue(0, 1170), -50, 100.0f, 30, true, 0 };
+		Enemy e = { (float)GetRandomValue(0, 1170), -50.0f, 100.0f, 30.0f, true, 0 };
 		enemies.push_back(e);
 		total++;
 	}
@@ -79,18 +91,14 @@ void UpdateEnemies(std::vector<Enemy>& enemies, float& spawnTimer,
 		e.lifeTimer += dt;
 		if (e.y > 1000 || e.lifeTimer > 6.0f) e.active = false;
 	}
-	for (int i = (int)enemies.size() - 1; i >= 0; i--)
-		if (!enemies[i].active) enemies.erase(enemies.begin() + i);
 }
 void CheckCollisions(std::vector<Bullet>& bullets, std::vector<Enemy>& enemies,
 	int& score, int& killed) {
 	for (auto& b : bullets) {
 		if (!b.active) continue;
-
+		Rectangle br = { b.x, b.y, 5, 10 };
 		for (auto& e : enemies) {
 			if (!e.active) continue;
-
-			Rectangle br = { b.x, b.y, 5, 10 };
 			Rectangle er = { e.x, e.y, (float)e.size, (float)e.size };
 
 			if (CheckCollisionRecs(br, er)) {
@@ -103,6 +111,19 @@ void CheckCollisions(std::vector<Bullet>& bullets, std::vector<Enemy>& enemies,
 		}
 	}
 }
+
+void CleanupDead(std::vector<Bullet>& bullets, std::vector<Enemy>& enemies) {
+	bullets.erase(
+		std::remove_if(bullets.begin(), bullets.end(),
+			[](const Bullet& b) { return !b.active; }),
+		bullets.end());
+
+	enemies.erase(
+		std::remove_if(enemies.begin(), enemies.end(),
+			[](const Enemy& e) { return !e.active; }),
+		enemies.end());
+}
+
 void DrawGame(Player& player, std::vector<Enemy>& enemies,
 	std::vector<Bullet>& bullets,
 	int score, int killed, int total, float gameTime) {
@@ -119,7 +140,7 @@ void DrawGame(Player& player, std::vector<Enemy>& enemies,
 		DrawRectangle((int)e.x, (int)e.y - 10, (int)(e.size * ratio), 6, GREEN);
 	}
 	for (auto& b : bullets)
-		if (b.active) DrawRectangle((int)b.x, (int)b.y, 5, 10, RED);
+		DrawRectangle((int)b.x, (int)b.y, 5, 10, RED);
 
 	DrawText("WASD to move, Mouse to shoot", 10, 10, 20, SKYBLUE);
 	DrawText(TextFormat("Score: %d", score), 10, 40, 24, WHITE);
@@ -135,9 +156,9 @@ GameState DrawMenu() {
 	DrawRectangleLinesEx({ (float)px, (float)py, 400, 300 }, 2, WHITE);
 	int tw = MeasureText("MY SHOOTER", 40);
 	DrawText("MY SHOOTER", px + 200 - tw / 2, py + 40, 40, WHITE);
-	if (DrawButton("Start", px + 90, py + 130, 220, 60)) return PLAYING;
-	if (DrawButton("Exit", px + 90, py + 210, 220, 60)) return EXIT;
-	return MENU;
+	if (DrawButton("Start", px + 90, py + 130, 220, 60)) return GameState::PLAYING;
+	if (DrawButton("Exit", px + 90, py + 210, 220, 60)) return GameState::EXIT;
+	return GameState::MENU;
 }
 
 GameState DrawGameOver(int& score, int& killed, int& total,
@@ -156,31 +177,33 @@ GameState DrawGameOver(int& score, int& killed, int& total,
 	if (DrawButton("Play Again", px + 80, py + 250, 240, 60)) {
 		ResetGame(player, bullets, enemies,
 			score, killed, total, gameTime, spawnTimer);
-		return PLAYING;
+		return GameState::PLAYING;
 	}
-	if (DrawButton("Exit", px + 80, py + 350, 240, 60)) return EXIT;
-	return GAMEOVER;
+	if (DrawButton("Exit", px + 80, py + 350, 240, 60)) return GameState::EXIT;
+	return GameState::GAMEOVER;
 }
 int main() {
 	InitWindow(1200, 1000, "My Shooter");
 	SetTargetFPS(60);
 
-	GameState state = MENU;
+	GameState state = GameState::MENU;
 	Player player;
 	std::vector<Bullet> bullets;
 	std::vector<Enemy>  enemies;
+	bullets.reserve(200);
+	enemies.reserve(20);
 	int   score = 0, killedEnemies = 0, totalEnemies = 0;
 	float gameTime = 60.0f, spawnTimer = 0, spawnInterval = 1.5f;
 
 	ResetGame(player, bullets, enemies,
 		score, killedEnemies, totalEnemies, gameTime, spawnTimer);
 
-	while (!WindowShouldClose() && state != EXIT) {
+	while (!WindowShouldClose() && state != GameState::EXIT) {
 		float dt = GetFrameTime();
 
-		if (state == PLAYING) {
+		if (state == GameState::PLAYING) {
 			gameTime -= dt;
-			if (gameTime <= 0) { gameTime = 0; state = GAMEOVER; }
+			if (gameTime <= 0) { gameTime = 0; state = GameState::GAMEOVER; }
 			UpdatePlayer(player, bullets, dt);
 			UpdateBullets(bullets, dt);
 			UpdateEnemies(enemies, spawnTimer, spawnInterval, totalEnemies, dt);
@@ -189,12 +212,12 @@ int main() {
 
 		BeginDrawing();
 		ClearBackground(BLACK);
-		if (state == MENU)
+		if (state == GameState::MENU)
 			state = DrawMenu();
-		else if (state == PLAYING)
+		else if (state == GameState::PLAYING)
 			DrawGame(player, enemies, bullets,
 				score, killedEnemies, totalEnemies, gameTime);
-		else if (state == GAMEOVER)
+		else if (state == GameState::GAMEOVER)
 			state = DrawGameOver(score, killedEnemies, totalEnemies,
 				player, bullets, enemies,
 				gameTime, spawnTimer);
