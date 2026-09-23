@@ -208,6 +208,7 @@ int main() {
 			UpdateBullets(bullets, dt);
 			UpdateEnemies(enemies, spawnTimer, spawnInterval, totalEnemies, dt);
 			CheckCollisions(bullets, enemies, score, killedEnemies);
+			CleanupDead(bullets, enemies);
 		}
 
 		BeginDrawing();
